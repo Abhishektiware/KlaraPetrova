@@ -4,9 +4,8 @@ const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { NewMessage } = require("telegram/events");
 const OpenAI = require("openai");
-const { resolveInviteLink } = require("telegram/Utils");
 
-// Import the adult personality
+// Import the personality
 const { SYSTEM_PROMPT } = require("./character");
 
 // ===============================
@@ -60,8 +59,8 @@ async function generateReply(userId, userMessage) {
         content: userMessage,
     });
 
-    // Keep latest 25 messages for better context
-    const recentHistory = history.slice(-25);
+    // Keep latest 30 messages for better context memory
+    const recentHistory = history.slice(-30);
 
     const response = await ai.chat.completions.create({
 
@@ -70,15 +69,15 @@ async function generateReply(userId, userMessage) {
         messages: [
             {
                 role: "system",
-                content: SYSTEM_PROMPT, // Using the adult personality from character.js
+                content: SYSTEM_PROMPT,
             },
 
             ...recentHistory,
         ],
 
-        temperature: 0.95, // Increased for more sexual/dirty creativity
-        max_tokens: 400,   // Increased for longer sexual responses
-        presence_penalty: 0.4, // Encourage varied sexual vocabulary
+        temperature: 0.9,
+        max_tokens: 350,
+        presence_penalty: 0.3,
         frequency_penalty: 0.2,
     });
 
@@ -86,7 +85,7 @@ async function generateReply(userId, userMessage) {
         response.choices?.[0]?.message?.content?.trim();
 
     if (!reply) {
-        return "Mmm I got distracted thinking about your cock baby 😈💦";
+        return "Hmm... 😅";
     }
 
     history.push({
@@ -120,7 +119,7 @@ async function main() {
 
     console.log("");
     console.log("================================");
-    console.log("   KLARA AI IS ONLINE (NSFW) 🔥");
+    console.log("   KLARA AI IS ONLINE ✅");
     console.log("================================");
 
     console.log("Name:", me.firstName);
