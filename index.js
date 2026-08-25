@@ -63,24 +63,16 @@ async function generateReply(userId, userMessage) {
     const recentHistory = history.slice(-30);
 
     const response = await ai.chat.completions.create({
-
         model: MODEL,
-
         messages: [
-            {
-                role: "system",
-                content: SYSTEM_PROMPT,
-            },
-
+            { role: "system", content: SYSTEM_PROMPT },
             ...recentHistory,
         ],
-
         temperature: 0.9,
-        max_tokens: 350,
-        presence_penalty: 0.3,
-        frequency_penalty: 0.2,
+        max_tokens: 120,        // REDUCED - forces short responses
+        presence_penalty: 0.2,
+        frequency_penalty: 0.1,
     });
-
     const reply =
         response.choices?.[0]?.message?.content?.trim();
 
