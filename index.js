@@ -63,24 +63,28 @@ async function generateReply(userId, userMessage) {
     const recentHistory = history.slice(-30);
 
     const response = await ai.chat.completions.create({
+
         model: MODEL,
+
         messages: [
-            { role: "system", content: SYSTEM_PROMPT },
+            {
+                role: "system",
+                content: SYSTEM_PROMPT,
+            },
+
             ...recentHistory,
         ],
+
         temperature: 0.9,
-        max_tokens: 120,        // REDUCED - forces short responses
-        presence_penalty: 0.2,
-        frequency_penalty: 0.1,
+        max_tokens: 350,
+        presence_penalty: 0.3,
+        frequency_penalty: 0.2,
     });
-    const reply = response.choices?.[0]?.message?.content?.trim();
+
+    const reply =
+        response.choices?.[0]?.message?.content?.trim();
 
     if (!reply) {
-        // FIX: Save the fallback to history so she doesn't get stuck!
-        history.push({
-            role: "assistant",
-            content: "Hmm... 😅",
-        });
         return "Hmm... 😅";
     }
 
@@ -91,147 +95,122 @@ async function generateReply(userId, userMessage) {
 
     return reply;
 }
-    // ===============================
-    // MAIN
-    // ===============================
 
-    async function main() {
+// ===============================
+// MAIN
+// ===============================
 
-        console.log("Connecting Klara...");
+async function main() {
 
-        await client.connect();
+    console.log("Connecting Klara...");
 
-        if (!(await client.checkAuthorization())) {
+    await client.connect();
 
-            console.error(
-                "Klara Telegram session is not authorized."
-            );
-
-            process.exit(1);
-        }
-
-        const me = await client.getMe();
-
-        console.log("");
-        console.log("================================");
-        console.log("   KLARA AI IS ONLINE ✅");
-        console.log("================================");
-
-        console.log("Name:", me.firstName);
-        console.log("Username:", me.username);
-
-        console.log("--------------------------------");
-        console.log("AI Model:", MODEL);
-        console.log("--------------------------------");
-        console.log("Waiting for messages...");
-        console.log("--------------------------------");
-
-        client.addEventHandler(
-
-            async (event) => {
-
-                try {
-
-                    const message = event.message;
-
-                    // Ignore empty messages
-                    if (!message.text) return;
-
-                    // Only private chats
-                    if (!event.isPrivate) return;
-
-                    // Don't respond to ourselves
-                    if (message.out) return;
-
-                    const sender = await message.getSender();
-
-                    const userId = sender.id.toString();
-
-                    console.log("");
-                    console.log("==============================");
-                    console.log("NEW MESSAGE");
-                    console.log("==============================");
-
-                    console.log(
-                        "From:",
-                        sender.username
-                            ? `@${sender.username}`
-                            : sender.firstName || userId
-                    );
-
-                    console.log(
-                        "Message:",
-                        message.text
-                    );
-
-                    // Load user data
-                    const { getUser, incrementMessages, decrementCredits, hasActiveSubscription } = require("./database");
-                    const { FREE_TRIAL_LIMIT } = require("./plans");
-                    const { PLANS } = require("./plans");
-                    const user = getUser(userId);
-
-                    // Entitlement check
-                    let allow = false;
-                    if (user.free_messages < FREE_TRIAL_LIMIT) {
-                        // trial usage
-                        incrementMessages(userId);
-                        allow = true;
-                    } else if (user.message_credits && user.message_credits > 0) {
-                        decrementCredits(userId);
-                        allow = true;
-                    } else if (hasActiveSubscription(userId)) {
-                        allow = true;
-                    }
-
-                    if (!allow) {
-                        const paywallMsg = `you just pay baby you are running out\n\nTrial: ₹49 for 10 messages\nBasic: ₹199 for 24 hours unlimited chat\nWeekly: ₹499 for 7 days + voice messages\nMonthly: ₹1,499 for 30 days + priority replies + "exclusive pics"\n\nPay here: https://yourdomain.com/pay?plan=trial\nPay here: https://yourdomain.com/pay?plan=basic\nPay here: https://yourdomain.com/pay?plan=weekly\nPay here: https://yourdomain.com/pay?plan=monthly`;
-                        await message.reply({ message: paywallMsg });
-                        console.log("Paywall sent ✅");
-                        return;
-                    }
-
-                    console.log(
-                        "Generating Klara response..."
-                    );
-
-                    const reply = await generateReply(
-                        userId,
-                        message.text
-                    );
-
-                    console.log(
-                        "Klara:",
-                        reply
-                    );
-
-                    await message.reply({
-                        message: reply,
-                    });
-
-                    console.log("Reply sent ✅");
-
-                } catch (error) {
-
-                    console.error(
-                        "Message handling error:",
-                        error
-                    );
-                }
-            },
-
-            new NewMessage({})
-        );
-
-        console.log(
-            "Klara is listening for messages..."
-        );
-    }
-
-    main().catch((error) => {
+    if (!(await client.checkAuthorization())) {
 
         console.error(
-            "Fatal error:",
-            error
+            "Klara Telegram session is not authorized."
         );
 
-    });
+        process.exit(1);
+    }
+
+    const me = await client.getMe();
+
+    console.log("");
+    console.log("================================");
+    console.log("   KLARA AI IS ONLINE ✅");
+    console.log("================================");
+
+    console.log("Name:", me.firstName);
+    console.log("Username:", me.username);
+
+    console.log("--------------------------------");
+    console.log("AI Model:", MODEL);
+    console.log("--------------------------------");
+    console.log("Waiting for messages...");
+    console.log("--------------------------------");
+
+    client.addEventHandler(
+
+        async (event) => {
+
+            try {
+
+                const message = event.message;
+
+                // Ignore empty messages
+                if (!message.text) return;
+
+                // Only private chats
+                if (!event.isPrivate) return;
+
+                // Don't respond to ourselves
+                if (message.out) return;
+
+                const sender = await message.getSender();
+
+                const userId = sender.id.toString();
+
+                console.log("");
+                console.log("==============================");
+                console.log("NEW MESSAGE");
+                console.log("==============================");
+
+                console.log(
+                    "From:",
+                    sender.username
+                        ? `@${sender.username}`
+                        : sender.firstName || userId
+                );
+
+                console.log(
+                    "Message:",
+                    message.text
+                );
+
+                console.log(
+                    "Generating Klara response..."
+                );
+
+                const reply = await generateReply(
+                    userId,
+                    message.text
+                );
+
+                console.log(
+                    "Klara:",
+                    reply
+                );
+
+                await message.reply({
+                    message: reply,
+                });
+
+                console.log("Reply sent ✅");
+
+            } catch (error) {
+
+                console.error(
+                    "Message handling error:",
+                    error
+                );
+            }
+        },
+
+        new NewMessage({})
+    );
+
+    console.log(
+        "Klara is listening for messages..."
+    );
+}
+
+main().catch((error) => {
+
+    console.error(
+        "Fatal error:",
+        error
+    );
+
+});
