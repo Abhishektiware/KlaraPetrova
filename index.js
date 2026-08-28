@@ -1,12 +1,17 @@
 require("dotenv").config();
 
-const { TelegramClient } = require("telegram");
+const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { NewMessage } = require("telegram/events");
 const OpenAI = require("openai");
+const db = require("./database");
 
 // Import the personality
 const { SYSTEM_PROMPT } = require("./character");
+const { downloadTelegramFile, deleteTempFile, validateImage } = require("./utils/fileUtils");
+const { analyzeImage } = require("./services/visionService");
+const { shouldSendPaidImage, sendPetrovaPaidImage, syncPaidImagesCatalog } = require("./services/paidImageService");
+
 
 // ===============================
 // TELEGRAM
@@ -131,16 +136,49 @@ async function main() {
     console.log("Waiting for messages...");
     console.log("--------------------------------");
 
+    // Sync paid-images library catalog on startup
+    syncPaidImagesCatalog();
+
+    // Handler for paid media purchases
+    client.addEventHandler(async (update) => {
+        try {
+            if (update instanceof Api.UpdateBotPurchasedPaidMedia) {
+                const userId = update.userId.toString();
+                const payload = update.payload;
+                console.log(`[Purchase Event] User ${userId} purchased paid media with payload: ${payload}`);
+
+                if (payload && payload.startsWith("paid_image:")) {
+                    const parts = payload.split(":");
+                    if (parts.length === 4) {
+                        const paidImageId = parts[3];
+                        db.markPaidImagePurchased(paidImageId, Date.now());
+                        console.log(`[Purchase Event] Successfully recorded purchase for paidImageId: ${paidImageId}`);
+                        
+                        // Send thank-you text in personality
+                        const thankYouText = "Aww thank you for unlocking my picture! 🙈 Hope u like it... let me know what u think! 😘";
+                        await client.sendMessage(userId, { message: thankYouText });
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("Error in purchase update handler:", err);
+        }
+    });
+
+    // Handler for incoming messages
     client.addEventHandler(
 
         async (event) => {
-
+            let tempFilePath = null;
             try {
 
                 const message = event.message;
 
-                // Ignore empty messages
-                if (!message.text) return;
+                // Detect photo
+                const hasPhoto = message.media && (message.media instanceof Api.MessageMediaPhoto || message.photo);
+
+                // Ignore if neither text nor photo is present
+                if (!message.text && !hasPhoto) return;
 
                 // Only private chats
                 if (!event.isPrivate) return;
@@ -166,8 +204,53 @@ async function main() {
 
                 console.log(
                     "Message:",
-                    message.text
+                    message.text || "[Photo]"
                 );
+
+                // Update database message and image counts
+                db.incrementUserMessageCount(userId);
+                if (hasPhoto) {
+                    db.incrementUserImageCount(userId);
+                }
+
+                let recentImageAnalysis = null;
+                if (hasPhoto) {
+                    try {
+                        console.log("Downloading user photo...");
+                        const mediaBuffer = await client.downloadMedia(message.media);
+                        if (mediaBuffer) {
+                            const fs = require("fs");
+                            const path = require("path");
+                            const crypto = require("crypto");
+
+                            const tmpDir = path.join(__dirname, "tmp_images");
+                            if (!fs.existsSync(tmpDir)) {
+                                fs.mkdirSync(tmpDir);
+                            }
+                            tempFilePath = path.join(tmpDir, `${crypto.randomUUID()}.jpg`);
+                            fs.writeFileSync(tempFilePath, mediaBuffer);
+
+                            // Validate image
+                            validateImage(tempFilePath);
+
+                            // Analyze image
+                            console.log("Analyzing image via Vision AI...");
+                            recentImageAnalysis = await analyzeImage(tempFilePath);
+                            console.log("Vision analysis results:", recentImageAnalysis);
+                        }
+                    } catch (imgError) {
+                        console.error("Failed to download or analyze image:", imgError);
+                        await message.reply({
+                            message: "Aww, I couldn't see that photo properly. 😅 Can you send it again, or just tell me what it is? 😘",
+                        });
+                        return;
+                    }
+                }
+
+                let promptText = message.text || "";
+                if (recentImageAnalysis) {
+                    promptText = `[User uploaded a photo. Visual description of what is visible in the photo: ${recentImageAnalysis}]${message.text ? ` User caption: "${message.text}"` : ""}`;
+                }
 
                 console.log(
                     "Generating Klara response..."
@@ -175,7 +258,7 @@ async function main() {
 
                 const reply = await generateReply(
                     userId,
-                    message.text
+                    promptText
                 );
 
                 console.log(
@@ -189,12 +272,48 @@ async function main() {
 
                 console.log("Reply sent ✅");
 
+                // Evaluate if we should send a paid image
+                try {
+                    const stats = db.getUserStats(userId);
+                    const previousPaidImages = db.getUserPaidImages(userId);
+                    const history = conversations.get(userId) || [];
+
+                    const decision = await shouldSendPaidImage({
+                        userId,
+                        userMessage: message.text || "",
+                        conversationHistory: history,
+                        recentImageAnalysis: recentImageAnalysis || "",
+                        userImageCount: stats.image_count,
+                        userMessageCount: stats.message_count,
+                        lastPaidImageAt: stats.last_paid_image_at,
+                        previousPaidImages
+                    });
+
+                    console.log(`[Paid Image Decision] shouldSend: ${decision.shouldSend}, category: ${decision.imageCategory}, reason: ${decision.reason}`);
+
+                    if (decision.shouldSend && decision.imageCategory) {
+                        console.log(`Sending paid image to user ${userId}...`);
+                        const sendResult = await sendPetrovaPaidImage(client, userId, decision.imageCategory);
+                        if (sendResult.success) {
+                            console.log(`Paid image sent successfully!`);
+                        } else {
+                            console.warn(`Failed to send paid image:`, sendResult.error);
+                        }
+                    }
+                } catch (decErr) {
+                    console.error("Error in paid image evaluation flow:", decErr);
+                }
+
             } catch (error) {
 
                 console.error(
                     "Message handling error:",
                     error
                 );
+            } finally {
+                if (tempFilePath) {
+                    deleteTempFile(tempFilePath);
+                }
             }
         },
 
